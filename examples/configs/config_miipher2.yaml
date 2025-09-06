@@ -1,0 +1,242 @@
+# Miipher-2 Configuration
+# Universal Speech Restoration Model with Parallel Adapters
+
+# Data preprocessing configuration
+preprocess:
+  preprocess_dataset:
+    _target_: torch.utils.data.ConcatDataset
+    datasets:
+      # Multilingual datasets for universal training
+      - 
+        _target_: miipher.dataset.jvs_corpus.JVSCorpus
+        root: /mnt/hdd/datasets/jvs_ver1/
+      - 
+        _target_: miipher.dataset.libritts.LibriTTSCorpus
+        root: /mnt/hdd/datasets/libritts-r/LibriTTS_R/
+      # Add more multilingual datasets here
+      # - 
+      #   _target_: miipher.dataset.multilingual.MultilingualCorpus
+      #   languages: ["en", "es", "fr", "de", "zh", "ja", "ko", "ar", "hi", "pt"]
+      #   root: /mnt/hdd/datasets/multilingual/
+  
+  # Degradation configuration for robust training
+  degration:
+    format_encoding_pairs:
+      - format: mp3
+        compression: 16
+      - format: mp3
+        compression: 32
+      - format: mp3
+        compression: 64
+      - format: mp3
+        compression: 128
+      - format: vorbis
+        compression: -1
+      - format: vorbis
+        compression: 0
+      - format: vorbis
+        compression: 1
+      - format: wav
+        encoding: ALAW
+        bits_per_sample: 8
+      # Additional compression formats for robustness
+      - format: aac
+        bitrate: 64
+      - format: aac
+        bitrate: 128
+      - format: aac
+        bitrate: 256
+    
+    # Reverberation conditions
+    reverb_conditions:
+      p: 0.5
+      reverbation_times:
+        max: 0.5
+        min: 0.2
+      room_xy:
+        max: 10.0
+        min: 2.0
+      room_z:
+        max: 5.0
+        min: 2.0
+      room_params:
+        fs: 22050
+        max_order: 10
+        absorption: 0.2
+      source_pos:
+        - 1.0
+        - 1.0
+        - 1.0
+      mic_pos:
+        - 1.0
+        - 0.7
+        - 1.2
+    
+    n_rirs: 1000
+    
+    # Background noise augmentation
+    background_noise:
+      snr:
+        max: 30.0
+        min: 5.0
+      patterns:
+        -
+          - /mnt/hdd/datasets/slakh2100_flac_redux
+          - '**/mix.flac'
+        - 
+          - /mnt/hdd/datasets/TAU_urban/audio/
+          - '**/*.wav'
+        # Add more noise datasets for robustness
+        # -
+        #   - /mnt/hdd/datasets/freesound_noise/
+        #   - '**/*.wav'
+  
+  # Dataset output configuration
+  train_tar_sink:
+    _target_: webdataset.ShardWriter
+    pattern: "/mnt/hdd/miipher2/miipher2-train-%06d.tar.gz"
+  val_tar_sink:
+    _target_: webdataset.ShardWriter
+    pattern: "/mnt/hdd/miipher2/miipher2-val-%06d.tar.gz"
+  val_size: 6000
+  n_repeats: 4
+
+# Audio configuration
+sample_rate: 22050
+
+# Data loading configuration
+data:
+  train_dataset_path: /mnt/hdd/miipher2/miipher2-train-{000000..000663}.tar.gz
+  val_dataset_path: /mnt/hdd/miipher2/miipher2-val-{000000..000007}.tar.gz
+  train_batch_size: 16  # Increased batch size for efficiency
+  val_batch_size: 16
+  
+  # Audio processing configuration
+  audio_processor:
+    sr: 22050
+    max_audio_length: 10.0  # Maximum audio length in seconds
+    min_audio_length: 1.0   # Minimum audio length in seconds
+
+# Training configuration
+train:
+  loggers:
+    - _target_: lightning.pytorch.loggers.WandbLogger
+      project: "miipher2"
+      name: "miipher2-universal"
+  
+  trainer:
+    _target_: lightning.Trainer
+    accelerator: "gpu"
+    devices: -1
+    check_val_every_n_epoch: 1
+    max_epochs: 1000  # Reduced epochs due to efficiency
+    gradient_clip_val: 1.0
+    accumulate_grad_batches: 2  # Gradient accumulation for larger effective batch size
+    
+    # Mixed precision training for efficiency
+    precision: "16-mixed"
+    
+    # Callbacks
+    callbacks:
+      - _target_: lightning.pytorch.callbacks.ModelCheckpoint
+        monitor: "val/loss"
+        mode: "min"
+        save_top_k: 3
+        filename: "miipher2-{epoch:02d}-{val/loss:.4f}"
+      
+      - _target_: lightning.pytorch.callbacks.EarlyStopping
+        monitor: "val/loss"
+        patience: 50
+        mode: "min"
+      
+      - _target_: lightning.pytorch.callbacks.LearningRateMonitor
+        logging_interval: "epoch"
+
+# Model configuration
+model:
+  # Universal Speech Model (USM) configuration
+  usm_model:
+    _target_: miipher.model.usm_integration.USMFeatureExtractor
+    model_name: "Atotti/google-usm"
+    source_model_id: "google/gemma-3n-e2b-it"
+    freeze: true  # Keep USM frozen during training
+    cache_dir: "./models/usm"
+  
+  # Miipher-2 model configuration
+  miipher2:
+    usm_dim: 1536  # USM feature dimension (updated for real USM)
+    n_adapters: 12  # Number of parallel adapters
+    adapter_hidden_dim: 1024  # Hidden dimension for adapters
+    dropout: 0.1  # Dropout rate for adapters
+    freeze_usm: true  # Ensure USM remains frozen
+  
+  # Loss configuration
+  use_perceptual_loss: false  # Enable for better quality (computationally expensive)
+  
+  # WaveFit vocoder configuration
+  wavefit_vocoder:
+    _target_: miipher.model.wavefit_integration.WaveFitVocoder
+    model_path: "./models/wavefit/checkpoint.pth"
+    model_type: "wavefit-3_mem-efficient"  # Memory-efficient for Miipher-2
+    sample_rate: 22050
+    hop_length: 256
+    win_length: 1024
+    n_mel_channels: 80
+
+# Optimizer configuration
+optimizers:
+  _target_: torch.optim.AdamW
+  lr: 1e-4  # Learning rate optimized for parallel adapters
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  eps: 1e-8
+
+# Learning rate scheduler
+scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+  T_max: 1000  # Maximum number of epochs
+  eta_min: 1e-6  # Minimum learning rate
+
+# Inference configuration
+inference:
+  batch_size: 32
+  device: "cuda"
+  mixed_precision: true
+  
+  # Audio processing for inference
+  audio_processing:
+    target_sr: 22050
+    max_length: 10.0  # Maximum audio length for inference
+    
+  # Output configuration
+  output:
+    save_features: true  # Save USM features
+    save_audio: false    # Save reconstructed audio (requires vocoder)
+    output_dir: "./miipher2_outputs/"
+
+# Evaluation configuration
+evaluation:
+  metrics:
+    - "mse"  # Mean Squared Error
+    - "mae"  # Mean Absolute Error
+    - "stoi" # Short-Time Objective Intelligibility
+    - "pesq" # Perceptual Evaluation of Speech Quality
+  
+  # Test datasets
+  test_datasets:
+    - name: "libritts_test"
+      path: "/mnt/hdd/datasets/libritts-r/LibriTTS_R/test/"
+    - name: "jvs_test"
+      path: "/mnt/hdd/datasets/jvs_ver1/test/"
+    # Add more test datasets for comprehensive evaluation
+
+# Logging configuration
+logging:
+  level: "INFO"
+  log_every_n_steps: 100
+  log_model_summary: true
+  
+# Reproducibility
+seed: 42
+deterministic: true
+

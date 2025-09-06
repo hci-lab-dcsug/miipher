@@ -1,0 +1,41 @@
+# Miipher-2 Requirements
+# Real USM and WaveFit implementations
+
+# Core dependencies
+torch>=2.1.0
+torchaudio>=0.12.0
+lightning>=2.0.5
+
+# USM Integration
+transformers>=4.53.0
+soundfile>=0.12.1
+
+# WaveFit Integration
+numpy>=1.21.0
+librosa>=0.9.0
+scipy>=1.7.0
+
+# Optional: For better performance
+accelerate>=0.20.0
+
+# Data processing
+webdataset>=0.2.48
+hydra-core>=1.3.2
+
+# Logging and monitoring
+wandb>=0.15.7
+
+# Audio processing
+pyroomacoustics>=0.7.3
+
+# Development dependencies
+pytest>=7.4.0
+black>=23.7.0
+ipykernel>=6.24.0
+
+# Note: For real WaveFit integration, you'll need to:
+# 1. Clone the wavefit-pytorch repository:
+#    git clone https://github.com/yukara-ikemiya/wavefit-pytorch.git
+# 2. Install it:
+#    pip install -e ./wavefit-pytorch
+# 3. Update the import paths in wavefit_integration.py
